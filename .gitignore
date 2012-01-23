@@ -1,0 +1,7 @@
+config.py
+*.pyc
+.Python
+bin/
+lib/
+include/
+boto*
