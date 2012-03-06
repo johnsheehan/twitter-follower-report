@@ -60,9 +60,9 @@ class Followers:
         apiData = self.twitter.ApiCall('users/lookup', 'GET', { 'user_id' : user_ids_string })
 
         for user in apiData:
-            body.append('%s (%s)' % (user['screen_name'], user['name']))
-            body.append('https://twitter.com/#!/%s' % user['screen_name'])
-            body.append(user['description'])
+            body.append(u'%s (%s)' % (user['screen_name'], user['name']))
+            body.append(u'https://twitter.com/#!/%s' % user['screen_name'])
+            body.append(unicode(user['description']))
             body.append('')
 
     def check_schema(self):
