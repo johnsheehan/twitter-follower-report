@@ -1,18 +1,9 @@
-oauth_config = {
-	"consumer_key": "",
-    "consumer_secret": "",
-    "token": "",
-    "token_secret": ""
-}
+TWITTER_CONSUMER_KEY = ''
+TWITTER_CONSUMER_SECRET = ''
+TWITTER_ACCESS_TOKEN = ''
+TWITTER_TOKEN_SECRET = ''
 
-aws_config = {
-	"access_key_id": "",
-	"secret_access_key": ""
-}
-
-sendgrid_config = {
-	"api_user": "",
-	"api_key": "",
-	"from_address": "",
-	"to_address": ""
-}
+SENDGRID_API_USER = ''
+SENDGRID_API_KEY = ''
+FROM_ADDRESS = ''
+TO_ADDRESS = ''

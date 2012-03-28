@@ -1,156 +1,96 @@
 from oauthtwitter import OAuthApi
-from config import oauth_config
-from config import aws_config
-from config import sendgrid_config
+import config
 from time import time
-import oauth2 as oauth
-import boto
 import requests
+import redis
 
-class Followers: 
-    twitter = None
-    conn = None
-    table = None
-    table_name = 'followers'
-    hash_key = 'follower'
+r = redis.StrictRedis(host='localhost', port=6379, db=1)
+twitter = OAuthApi(config.TWITTER_CONSUMER_KEY, config.TWITTER_CONSUMER_SECRET, config.TWITTER_ACCESS_TOKEN, config.TWITTER_TOKEN_SECRET)
+
+body = []
+
+def main():
+    # retreive followers
+    #   returns a dict formatted from the JSON data returned
     ids = []
-    follow_ids = []
+    print 'getting twitter follower ids 5000 at a time'
+    cursor = -1;
+    while cursor != 0:
+        apiData = twitter.ApiCall('followers/ids', 'GET', { 'cursor' : cursor })
+
+        print 'retrieved (next): %s (%s)' % (len(apiData['ids']), apiData['next_cursor'])
+
+        ids.extend(apiData['ids'])
+        cursor = apiData['next_cursor']
+
+    print 'retrieved total followers: %s' % len(ids) 
+
+
+    # update entries in db but not follower list as unfollowed
+    existing = r.zrevrange('followers', 0, -1)
+    print 'followers in database: %s' % len(existing)
+    print 'checking for unfollows'
     unfollow_ids = []
+    follow_ids = []
 
-    def main(self):
-        self.check_schema()
-        self.fetch_and_store_followers()
-        self.compare_ids()
-        self.send_report()
+    for uid in existing:
+        if long(uid) in ids: continue
 
-    def send_report(self):
-        body = []
-        body.append('*** Unfollows ***')
-        body.append('')
+        # update item
+        print 'unfollowed by: %s' % uid
+        unfollow_ids.append(uid)
+        r.zrem('followers', uid)
 
-        # look up info for unfollows
-        if self.unfollow_ids:
-            self.add_details_to_report(self.unfollow_ids, body)
+    # create new entries if they don't exist
+    print 'checking for new followers'
+    for uid in ids:
+        if (r.zrank('followers', uid) > 0):
+            continue
+
+        print 'followed by: %s' % uid
+        follow_ids.append(uid)
+        r.zadd('followers', time(), uid)
+
+    # create email body
+    body.append('*** Unfollows ***')
+    body.append('')
+
+    # look up info for unfollows
+    if unfollow_ids:
+        add_details_to_report(unfollow_ids)
+
+    body.append('*** Follows ***')
+    body.append('')
+
+    if follow_ids:
+        add_details_to_report(follow_ids)
+
+    print '\n'.join(body)
+
+    if not unfollow_ids and not follow_ids: return
+
+    # send email report
+    data = {
+        'api_user': config.SENDGRID_API_USER, 
+        'api_key': config.SENDGRID_API_KEY,
+        'to': config.TO_ADDRESS,
+        'from': config.FROM_ADDRESS,
+        'subject': 'Twitter follower report',
+        'text': '\n'.join(body)
+    }
+
+    resp = requests.post('https://sendgrid.com/api/mail.send.json', data=data)
+    print resp.content
     
-        body.append('*** Follows ***')
+def add_details_to_report(user_ids):
+    user_ids_string = ','.join(map(str, user_ids))
+    apiData = twitter.ApiCall('users/lookup', 'GET', { 'user_id' : user_ids_string })
+
+    for user in apiData:
+        body.append(u'%s (%s)' % (user['screen_name'], user['name']))
+        body.append(u'https://twitter.com/#!/%s' % user['screen_name'])
+        body.append(unicode(user['description']))
         body.append('')
-
-        if self.follow_ids:
-            self.add_details_to_report(self.follow_ids, body)
-    
-        print '\n'.join(body)
-
-        if not self.unfollow_ids and not self.follow_ids: return
-
-        # send email report
-        data = {
-            'api_user': sendgrid_config['api_user'], 
-            'api_key': sendgrid_config['api_key'],
-            'to': sendgrid_config['to_address'],
-            'from': sendgrid_config['from_address'],
-            'subject': 'Twitter follower report',
-            'text': '\n'.join(body)
-        }
-
-        resp = requests.post('https://sendgrid.com/api/mail.send.json', data=data)
-        print resp.content
-        
-    def add_details_to_report(self, user_ids, body):
-        user_ids_string = ','.join(map(str, user_ids))
-        apiData = self.twitter.ApiCall('users/lookup', 'GET', { 'user_id' : user_ids_string })
-
-        for user in apiData:
-            body.append(u'%s (%s)' % (user['screen_name'], user['name']))
-            body.append(u'https://twitter.com/#!/%s' % user['screen_name'])
-            body.append(unicode(user['description']))
-            body.append('')
-
-    def check_schema(self):
-        self.conn = boto.connect_dynamodb(
-            aws_access_key_id=aws_config['access_key_id'],
-            aws_secret_access_key=aws_config['secret_access_key']
-        )
-
-        print 'checking for existing table'
-        tables = self.conn.list_tables()
-        if self.table_name not in tables:
-            print 'table not found, creating'
-            followers_table_schema = self.conn.create_schema(
-                hash_key_name='follower',
-                hash_key_proto_value='S',
-                range_key_name='id',
-                range_key_proto_value='N'
-            )
-
-            self.table = self.conn.create_table(
-                name=self.table_name,
-                schema=followers_table_schema,
-                read_units=3,
-                write_units=5
-            )
-        else:
-            print 'table already exists'
-            self.table = self.conn.get_table(self.table_name)
-
-    def fetch_and_store_followers(self):
-        # setup oauth
-        consumer_key    = oauth_config['consumer_key']
-        consumer_secret = oauth_config['consumer_secret']
-        token           = oauth_config['token']
-        token_secret    = oauth_config['token_secret']
-
-        # retreive followers
-        self.twitter = OAuthApi(consumer_key, consumer_secret, token, token_secret)
-
-        #returns a dict formatted from the JSON data returned
-        print 'getting twitter follower ids 5000 at a time'
-        cursor = -1;
-        while cursor != 0:
-            apiData = self.twitter.ApiCall('followers/ids', 'GET', { 'cursor' : cursor })
-
-            print 'retrieved (next): %s (%s)' % (len(apiData['ids']), apiData['next_cursor'])
-
-            self.ids.extend(apiData['ids'])
-            cursor = apiData['next_cursor']
-
-        print 'retrieved total followers: %s' % len(self.ids) 
-        
-    def compare_ids(self):
-        # update entries in db but not follower list as unfollowed
-        existing = self.table.query(self.hash_key)
-        print 'followers in database: %s' % len(existing)
-        print 'checking for unfollows'
-
-        for follower in existing:
-            uid = follower['id']
-            if long(uid) in self.ids: continue
-
-            # update item
-            print 'unfollowed by: %s' % uid
-            self.unfollow_ids.append(uid)
-            item = self.table.get_item(self.hash_key, str(uid))
-            item.delete()
-
-        # create new entries if they don't exist
-        print 'checking for new followers'
-        for uid in self.ids:
-            exists = next((row for row in existing if row['id'] == str(uid)), None)
-
-            if exists: continue
-
-            print 'followed by: %s' % uid
-            self.follow_ids.append(uid)
-            item_data = {
-                'followed_on': time()
-            }
-
-            item = self.table.new_item(
-                hash_key=self.hash_key,
-                range_key=str(uid),
-                attrs=item_data 
-            )
-
-            item.put()
 
 if __name__ == '__main__':
-    Followers().main()
+    main()

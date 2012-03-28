@@ -1,7 +1,5 @@
 config.py
 *.pyc
 .Python
-bin/
-lib/
-include/
-boto*
+.DS_Store
+ENV
