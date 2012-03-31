@@ -12,62 +12,9 @@ body = []
 def main():
     # retreive followers
     #   returns a dict formatted from the JSON data returned
-    ids = []
-    print 'getting twitter follower ids 5000 at a time'
-    cursor = -1;
-    while cursor != 0:
-        apiData = twitter.ApiCall('followers/ids', 'GET', { 'cursor' : cursor })
 
-        print 'retrieved (next): %s (%s)' % (len(apiData['ids']), apiData['next_cursor'])
-
-        ids.extend(apiData['ids'])
-        cursor = apiData['next_cursor']
-
-    print 'retrieved total followers: %s' % len(ids) 
-
-
-    # update entries in db but not follower list as unfollowed
-    existing = r.zrevrange('followers', 0, -1)
-    print 'followers in database: %s' % len(existing)
-    print 'checking for unfollows'
-    unfollow_ids = []
-    follow_ids = []
-
-    for uid in existing:
-        if long(uid) in ids: continue
-
-        # update item
-        print 'unfollowed by: %s' % uid
-        unfollow_ids.append(uid)
-        r.zrem('followers', uid)
-
-    # create new entries if they don't exist
-    print 'checking for new followers'
-    for uid in ids:
-        if (r.zrank('followers', uid) > 0):
-            continue
-
-        print 'followed by: %s' % uid
-        follow_ids.append(uid)
-        r.zadd('followers', time(), uid)
-
-    # create email body
-    body.append('*** Unfollows ***')
-    body.append('')
-
-    # look up info for unfollows
-    if unfollow_ids:
-        add_details_to_report(unfollow_ids)
-
-    body.append('*** Follows ***')
-    body.append('')
-
-    if follow_ids:
-        add_details_to_report(follow_ids)
-
-    print '\n'.join(body)
-
-    if not unfollow_ids and not follow_ids: return
+    compare('followers')
+    compare('friends')
 
     # send email report
     data = {
@@ -81,7 +28,63 @@ def main():
 
     resp = requests.post('https://sendgrid.com/api/mail.send.json', data=data)
     print resp.content
-    
+
+def compare(group):
+    ids = []
+    print 'getting twitter %s ids 5000 at a time' % group
+    cursor = -1;
+    while cursor != 0:
+        apiData = twitter.ApiCall('%s/ids' % group, 'GET', { 'cursor' : cursor })
+
+        print 'retrieved (next): %s (%s)' % (len(apiData['ids']), apiData['next_cursor'])
+
+        ids.extend(apiData['ids'])
+        cursor = apiData['next_cursor']
+
+    print 'retrieved total %s: %s' % (group, len(ids))
+
+
+    # update entries in db but not follower list as unfollowed
+    existing = r.zrevrange(group, 0, -1)
+    print '%s in database: %s' % (group, len(existing))
+    print 'checking for subtractions'
+    unfollow_ids = []
+    follow_ids = []
+
+    for uid in existing:
+        if long(uid) in ids: continue
+
+        # update item
+        print 'subtracted: %s' % uid
+        unfollow_ids.append(uid)
+        r.zrem(group, uid)
+
+    # create new entries if they don't exist
+    print 'checking for additions'
+    for uid in ids:
+        if (r.zrank(group, uid) > 0):
+            continue
+
+        print 'added: %s' % uid
+        follow_ids.append(uid)
+        r.zadd(group, time(), uid)
+
+    # create email body
+    body.append('*** (%s) Unfollows ***' % group)
+    body.append('')
+
+    # look up info for unfollows
+    if unfollow_ids:
+        add_details_to_report(unfollow_ids)
+
+    body.append('*** (%s) Follows ***' % group)
+    body.append('')
+
+    if follow_ids:
+        add_details_to_report(follow_ids)
+
+    print '\n'.join(body)
+
 def add_details_to_report(user_ids):
     user_ids_string = ','.join(map(str, user_ids))
     apiData = twitter.ApiCall('users/lookup', 'GET', { 'user_id' : user_ids_string })
