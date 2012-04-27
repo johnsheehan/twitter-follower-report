@@ -3,9 +3,11 @@ import config
 from time import time
 import requests
 import redis
+from stathat import StatHat
 
 r = redis.StrictRedis(host='localhost', port=6379, db=1)
 twitter = OAuthApi(config.TWITTER_CONSUMER_KEY, config.TWITTER_CONSUMER_SECRET, config.TWITTER_ACCESS_TOKEN, config.TWITTER_TOKEN_SECRET)
+sh = StatHat()
 
 body = []
 
@@ -42,6 +44,7 @@ def compare(group):
         cursor = apiData['next_cursor']
 
     print 'retrieved total %s: %s' % (group, len(ids))
+    sh.ez_post_value('ZDDdvwf49QKiPGzb', group, len(ids))
 
 
     # update entries in db but not follower list as unfollowed
@@ -86,14 +89,19 @@ def compare(group):
     print '\n'.join(body)
 
 def add_details_to_report(user_ids):
-    user_ids_string = ','.join(map(str, user_ids))
-    apiData = twitter.ApiCall('users/lookup', 'GET', { 'user_id' : user_ids_string })
+    for ids in chunker(user_ids, 100):
+        user_ids_string = ','.join(map(str, ids))
+        print user_ids_string
+        apiData = twitter.ApiCall('users/lookup', 'GET', { 'user_id' : user_ids_string })
 
-    for user in apiData:
-        body.append(u'%s (%s)' % (user['screen_name'], user['name']))
-        body.append(u'https://twitter.com/#!/%s' % user['screen_name'])
-        body.append(unicode(user['description']))
-        body.append('')
+        for user in apiData:
+            body.append(u'%s (%s)' % (user['screen_name'], user['name']))
+            body.append(u'https://twitter.com/#!/%s' % user['screen_name'])
+            body.append(unicode(user['description']))
+            body.append('')
+
+def chunker(seq, size):
+    return (seq[pos:pos + size] for pos in xrange(0, len(seq), size))
 
 if __name__ == '__main__':
     main()
