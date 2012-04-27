@@ -44,8 +44,7 @@ def compare(group):
         cursor = apiData['next_cursor']
 
     print 'retrieved total %s: %s' % (group, len(ids))
-    sh.ez_post_value('ZDDdvwf49QKiPGzb', group, len(ids))
-
+    sh.ez_post_value(config.STATHAT_KEY, group, len(ids))
 
     # update entries in db but not follower list as unfollowed
     existing = r.zrevrange(group, 0, -1)
