@@ -3,11 +3,9 @@ import config
 from time import time
 import requests
 import redis
-from stathat import StatHat
 
 r = redis.StrictRedis(host='localhost', port=6379, db=1)
 twitter = OAuthApi(config.TWITTER_CONSUMER_KEY, config.TWITTER_CONSUMER_SECRET, config.TWITTER_ACCESS_TOKEN, config.TWITTER_TOKEN_SECRET)
-sh = StatHat()
 
 body = []
 
@@ -44,7 +42,6 @@ def compare(group):
         cursor = apiData['next_cursor']
 
     print 'retrieved total %s: %s' % (group, len(ids))
-    sh.ez_post_value(config.STATHAT_KEY, group, len(ids))
 
     # update entries in db but not follower list as unfollowed
     existing = r.zrevrange(group, 0, -1)
